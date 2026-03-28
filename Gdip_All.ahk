@@ -1426,12 +1426,15 @@ Gdip_DrawImagePointsRect(pGraphics, pBitmap, Points, sx:="", sy:="", sw:="", sh:
 Gdip_DrawImage(pGraphics, pBitmap, dx:="", dy:="", dw:="", dh:="", sx:="", sy:="", sw:="", sh:="", Matrix:=1)
 {
 	Ptr := "UPtr"
+	ImageAttr := 0  ; --- 關鍵修正：確保變數在任何情況下都有初始值 ---
 
 	if !IsNumber(Matrix)
 		ImageAttr := Gdip_SetImageAttributesColorMatrix(Matrix)
 	else if (Matrix != 1)
+		; 這裡的 Matrix 轉化為透明度矩陣
 		ImageAttr := Gdip_SetImageAttributesColorMatrix("1|0|0|0|0|0|1|0|0|0|0|0|1|0|0|0|0|0|" Matrix "|0|0|0|0|0|1")
 
+	; 座標與尺寸的自動補完邏輯 (保持不變)
 	if (sx = "" && sy = "" && sw = "" && sh = "")
 	{
 		if (dx = "" && dy = "" && dw = "" && dh = "")
@@ -1448,6 +1451,7 @@ Gdip_DrawImage(pGraphics, pBitmap, dx:="", dy:="", dw:="", dh:="", sx:="", sy:="
 		}
 	}
 
+	; 執行 DllCall
 	_E := DllCall("gdiplus\GdipDrawImageRectRect"
 				, Ptr, pGraphics
 				, Ptr, pBitmap
@@ -1460,11 +1464,14 @@ Gdip_DrawImage(pGraphics, pBitmap, dx:="", dy:="", dw:="", dh:="", sx:="", sy:="
 				, "float", sw
 				, "float", sh
 				, "int", 2
-				, Ptr, ImageAttr ? ImageAttr : 0
+				, Ptr, ImageAttr ; v2 中若已初始化為 0，直接傳入即可
 				, Ptr, 0
 				, Ptr, 0)
+
+	; 清理 ImageAttributes 資源
 	if ImageAttr
 		Gdip_DisposeImageAttributes(ImageAttr)
+	
 	return _E
 }
 
@@ -1804,7 +1811,7 @@ Gdip_GetImageDimensions(pBitmap, & Width, & Height)
 
 Gdip_GetDimensions(pBitmap, & Width, & Height)
 {
-	Gdip_GetImageDimensions(pBitmap, Width, Height)
+	Gdip_GetImageDimensions(pBitmap, &Width, &Height)
 }
 
 ;#####################################################################################
@@ -2490,7 +2497,7 @@ Gdip_TextToGraphics(pGraphics, Text, Options, Font:="Arial", Width:="", Height:=
 	Gdip_SetTextRenderingHint(pGraphics, Rendering_val)
 	
 	; 測量文字
-	ReturnRC := Gdip_MeasureString(pGraphics, Text, hFont, hFormat, RC)
+	ReturnRC := Gdip_MeasureString(pGraphics, Text, hFont, hFormat, &RC)
 
 	if vPos
 	{
@@ -2505,11 +2512,11 @@ Gdip_TextToGraphics(pGraphics, Text, Options, Font:="Arial", Width:="", Height:=
 			ypos_val := Height_val - measuredH
 
 		CreateRectF(&RC, xpos_val, ypos_val, Width_val, measuredH)
-		ReturnRC := Gdip_MeasureString(pGraphics, Text, hFont, hFormat, RC)
+		ReturnRC := Gdip_MeasureString(pGraphics, Text, hFont, hFormat, &RC)
 	}
 
 	if !Measure
-		_E := Gdip_DrawString(pGraphics, Text, hFont, hFormat, pBrush, RC)
+		_E := Gdip_DrawString(pGraphics, Text, hFont, hFormat, pBrush, &RC)
 
 	; 清理
 	if !PassBrush
@@ -2526,10 +2533,9 @@ Gdip_DrawString(pGraphics, sString, hFont, hFormat, pBrush, & RectF)
 {
 	Ptr := "UPtr"
 
-
 	return DllCall("gdiplus\GdipDrawString"
 					, Ptr, pGraphics
-					, Ptr, &sString
+					, "Str", sString
 					, "int", -1
 					, Ptr, hFont
 					, "Ptr", RectF
@@ -2549,7 +2555,7 @@ Gdip_MeasureString(pGraphics, sString, hFont, hFormat, & RectF)
 	Lines := 0
 	DllCall("gdiplus\GdipMeasureString"
 					, Ptr, pGraphics
-					, Ptr, &sString
+					, "Str", sString
 					, "int", -1
 					, Ptr, hFont
 					, "Ptr", RectF
@@ -2605,7 +2611,7 @@ Gdip_FontFamilyCreate(Font)
 
 	hFamily := 0
 	DllCall("gdiplus\GdipCreateFontFamilyFromName"
-					, Ptr, &Font
+					, "Str", Font
 					, "uint", 0
 					, "UPtr*", &hFamily)
 
@@ -2832,7 +2838,7 @@ Gdip_ResetClip(pGraphics)
 Gdip_GetClipRegion(pGraphics)
 {
 	Region := Gdip_CreateRegion()
-	DllCall("gdiplus\GdipGetClip", "UPtr", pGraphics, "UInt", Region)
+	DllCall("gdiplus\GdipGetClip", "UPtr", pGraphics, "UPtr", Region)
 	return Region
 }
 
@@ -2898,7 +2904,7 @@ Gdip_GetLockBitPixel(Scan0, x, y, Stride)
 
 Gdip_PixelateBitmap(pBitmap, & pBitmapOut, BlockSize)
 {
-	static PixelateBitmap
+	static PixelateBitmap := 0
 
 	Ptr := "UPtr"
 
@@ -2968,7 +2974,7 @@ Gdip_PixelateBitmap(pBitmap, & pBitmapOut, BlockSize)
 
 	Width := 0
 	Height := 0
-	Gdip_GetImageDimensions(pBitmap, Width, Height)
+	Gdip_GetImageDimensions(pBitmap, &Width, &Height)
 
 	if (Width != Gdip_GetImageWidth(pBitmapOut) || Height != Gdip_GetImageHeight(pBitmapOut))
 		return -1
@@ -2976,15 +2982,15 @@ Gdip_PixelateBitmap(pBitmap, & pBitmapOut, BlockSize)
 		return -2
 
 	Stride1 := Stride2 := Scan01 := Scan02 := BitmapData1 := BitmapData2 := 0
-	E1 := Gdip_LockBits(pBitmap, 0, 0, Width, Height, Stride1, Scan01, BitmapData1)
-	E2 := Gdip_LockBits(pBitmapOut, 0, 0, Width, Height, Stride2, Scan02, BitmapData2)
+	E1 := Gdip_LockBits(pBitmap, 0, 0, Width, Height, &Stride1, &Scan01, &BitmapData1)
+	E2 := Gdip_LockBits(pBitmapOut, 0, 0, Width, Height, &Stride2, &Scan02, &BitmapData2)
 	if (E1 || E2)
 		return -3
 
 	; E := - unused exit code
 	DllCall(PixelateBitmap.Ptr, Ptr, Scan01, Ptr, Scan02, "int", Width, "int", Height, "int", Stride1, "int", BlockSize)
 
-	Gdip_UnlockBits(pBitmap, BitmapData1), Gdip_UnlockBits(pBitmapOut, BitmapData2)
+	Gdip_UnlockBits(pBitmap, &BitmapData1), Gdip_UnlockBits(pBitmapOut, &BitmapData2)
 	return 0
 }
 
@@ -3151,12 +3157,12 @@ GetPrimaryMonitor()
 ; Enumerates display monitors and returns an object containing the properties of all monitors or the specified monitor.
 ; ======================================================================================================================
 MDMF_Enum(HMON := "") {
-	Static EnumProc := CallbackCreate("MDMF_EnumProc")
+	Static EnumProc := CallbackCreate(MDMF_EnumProc)
 		Static Monitors := Map()
 	If (HMON = "") ; new enumeration
 	{
 		Monitors := Map("TotalCount", 0)
-		If !DllCall("User32.dll\EnumDisplayMonitors", "Ptr", 0, "Ptr", 0, "Ptr", EnumProc, "Ptr", &Monitors, "Int")
+		If !DllCall("User32.dll\EnumDisplayMonitors", "Ptr", 0, "Ptr", 0, "Ptr", EnumProc, "Ptr", ObjPtr(Monitors), "Int")
 			Return False
 	}
 	Return (HMON = "") ? Monitors : Monitors.Has(HMON) ? Monitors[HMON] : False
