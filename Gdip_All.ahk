@@ -2440,7 +2440,7 @@ Gdip_TextToGraphics(pGraphics, Text, Options, Font:="Arial", Width:="", Height:=
 	RegExMatch(Options, pattern_opts "Y([\-\d\.]+)(p*)", &ypos)
 	RegExMatch(Options, pattern_opts "W([\-\d\.]+)(p*)", &WidthObj)
 	RegExMatch(Options, pattern_opts "H([\-\d\.]+)(p*)", &HeightObj)
-	RegExMatch(Options, pattern_opts "C(?!(entre|enter))([a-f\d]+)", &ColourObj)
+	RegExMatch(Options, pattern_opts "C(?!(entre|enter))(?:0x)?([a-f\d]+)", &ColourObj)
 	RegExMatch(Options, pattern_opts "Top|Up|Bottom|Down|vCentre|vCenter", &vPos)
 	RegExMatch(Options, pattern_opts "NoWrap", &NoWrap)
 	RegExMatch(Options, pattern_opts "R(\d)", &Rendering)
@@ -2450,7 +2450,7 @@ Gdip_TextToGraphics(pGraphics, Text, Options, Font:="Arial", Width:="", Height:=
 		PassBrush := 1, pBrush := Integer("0x" ColourObj[2])
 
 	; 邏輯判斷修正：檢查 Match 物件是否存在
-	if !(IWidth && IHeight) && (xpos || ypos || WidthObj || HeightObj || SizeObj)
+	if !(IWidth && IHeight) && ((xpos && xpos[2]) || (ypos && ypos[2]) || (WidthObj && WidthObj[2]) || (HeightObj && HeightObj[2]) || (SizeObj && SizeObj[2]))
 		return -1
 
 	Style := 0, Styles := "Regular|Bold|Italic|BoldItalic|Underline|Strikeout"
@@ -2475,7 +2475,7 @@ Gdip_TextToGraphics(pGraphics, Text, Options, Font:="Arial", Width:="", Height:=
 	Height_val := HeightObj ? (HeightObj[2] ? IHeight*(HeightObj[1]/100) : HeightObj[1]) : IHeight
 	
 	if !PassBrush
-		Colour := "0x" (ColourObj ? ColourObj[2] : "ff000000")
+		Colour := Integer("0x" (ColourObj ? ColourObj[2] : "ff000000"))
 	
 	Rendering_val := (Rendering && (Rendering[1] >= 0) && (Rendering[1] <= 5)) ? Rendering[1] : 4
 	Size_val := (SizeObj && (Number(SizeObj[1]) > 0)) ? (SizeObj[2] ? IHeight*(SizeObj[1]/100) : SizeObj[1]) : 12
@@ -2673,6 +2673,40 @@ Gdip_AddPathPolygon(pPath, Points)
 Gdip_DeletePath(pPath)
 {
 	return DllCall("gdiplus\GdipDeletePath", "UPtr", pPath)
+}
+
+Gdip_AddPathString(pPath, sString, FontName, Style, Size, x, y, w, h) {
+    ; 將字串轉換為 Unicode (v2 預設就是，但呼叫 DLL 需明確)
+    Static Ptr := "Ptr"
+    
+    ; 建立字體族
+    If !DllCall("gdiplus\GdipCreateFontFamilyFromName", "Str", FontName, "Ptr", 0, "Ptr*", &hFamily := 0) {
+        ; 建立字串格式
+        DllCall("gdiplus\GdipCreateStringFormat", "Int", 0, "Int", 0, "Ptr*", &hFormat := 0)
+        
+        ; 建立 RectF 結構 (x, y, w, h)
+        RectF := Buffer(16)
+        NumPut("Float", x, RectF, 0)
+        NumPut("Float", y, RectF, 4)
+        NumPut("Float", w, RectF, 8)
+        NumPut("Float", h, RectF, 12)
+        
+        ; 將文字加入路徑 (GdipAddPathString 參數順序)
+        ; 3 = StringFormatFlagsNoWrap (依需求調整)
+        status := DllCall("gdiplus\GdipAddPathString", "Ptr", pPath, "Str", sString, "Int", -1, "Ptr", hFamily, "Int", Style, "Float", Size, "Ptr", RectF, "Ptr", hFormat)
+        
+        ; 清理臨時資源
+        DllCall("gdiplus\GdipDeleteFontFamily", "Ptr", hFamily)
+        DllCall("gdiplus\GdipDeleteStringFormat", "Ptr", hFormat)
+        
+        return status
+    }
+    return -1
+}
+
+; 1. 繪製路徑輪廓 (畫黑邊用)
+Gdip_DrawPath(pGraphics, pPen, pPath) {
+    return DllCall("gdiplus\GdipDrawPath", "Ptr", pGraphics, "Ptr", pPen, "Ptr", pPath)
 }
 
 ;#####################################################################################
